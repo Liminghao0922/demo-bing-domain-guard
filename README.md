@@ -12,8 +12,11 @@ docs\portal-step-by-step.ja.md
   配置 APIM fragments/产品/订阅、Application Insights、告警、UI 测试及回滚。
 docs\implementation.ja.md
   PDF 页码与交付物对照、实现契约、配置值、边界及上线前确认事项。
-客户无需在本地安装 VS Code/.NET/Azure CLI：可将配套的 bing-domain-guard-function.zip
-上传 Cloud Shell（Bash）并按日语手册 4.1 节发布；需要改代码时，也可在 Cloud Shell 构建源码 ZIP。
+客户无需在本地安装 VS Code/.NET/Azure CLI：推荐在 Cloud Shell（Bash）中直接
+git clone https://github.com/Liminghao0922/demo-bing-domain-guard.git，
+检查/安装 .NET 10 SDK，dotnet publish，打包并通过 Azure CLI 发布 Function。
+完整命令见日语手册 4.1 节。请记录实际构建的 commit，非公开仓库需先取得访问权限。
+提供的源码 ZIP、编译后 ZIP 作为备用路径；git clone 后应从当前源码构建，不直接使用仓库内旧 ZIP。
 
 核心行为
 --------

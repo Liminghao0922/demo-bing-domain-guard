@@ -4,20 +4,22 @@
 
 Azure Portal と Cloud Shell、または VS Code で、モック → APIM 判定 → 応答置換 → 検知ログ → 通知を確認します。
 **お客様の PC に VS Code / .NET SDK / Azure CLI をインストールしなくても実施できます。**
-推奨経路は Portal で環境を作成し、Cloud Shell の Azure CLI で Function を発行する方法です。
+推奨経路は Portal で環境を作成し、Cloud Shell で **git clone → .NET ビルド → ZIP 作成 → Function 発行**を行う方法です。
 その後の APIM・監視設定は Portal で実施します。Bicep の実行は不要です。
 診断の `metrics=true` は通常の設定画面にないため、Portal の「カスタムテンプレートのデプロイ」画面で設定します。
 
-事前ビルド済み ZIP を使う場合、Cloud Shell にも .NET SDK / Functions Core Tools は不要です。
-ソースを変更する場合は Cloud Shell 上でビルドできます。VS Code を利用する代替手順も掲載します。
+Cloud Shell に .NET 10 SDK がなければ、ユーザー領域に導入します。Functions Core Tools は不要です。
+SDK の導入や GitHub アクセスができない場合は、事前ビルド済み ZIP をアップロードする代替経路も使用できます。
+VS Code を利用する代替手順も掲載します。
 **Portal のコードエディターだけで C# isolated Function を作成・発行することはできません。**
 
 ### 準備するもの
 
 - 検証専用の Azure サブスクリプション/RG。リソース作成、APIM 設定変更、アラート/アクショングループ作成権限。
   例：検証 RG の Contributor。組織ポリシー/RBAC により追加権限が必要な場合があります。
-- Cloud Shell 経路：ブラウザーと、提供者から入手した `bing-domain-guard-function.zip`。
-  ソースからビルドする場合は `bing-domain-guard-cloudshell-source.zip` も用意。
+- Cloud Shell 経路：ブラウザーと[ソースリポジトリ](https://github.com/Liminghao0922/demo-bing-domain-guard)へのアクセス権。
+  GitHub / SDK / NuGet へ接続できること。接続制限がある場合の代替は提供者の
+  `bing-domain-guard-function.zip`、または `bing-domain-guard-cloudshell-source.zip`。
 - VS Code 経路を選ぶ場合のみ：ローカル .NET 10 SDK、Azure Functions Core Tools v4、VS Code、
   C# / Azure Functions / Azure Resources 拡張機能。Windows の Core Tools は公式 MSI 等を使用。
 - 受信確認できる検証用メールアドレス。メールには検索語やキーを含めないでください。
@@ -137,36 +139,69 @@ WORKDIR=$(mktemp -d "$HOME/bing-guard-cloudshell.XXXXXX")
 
 4. サブスクリプション、アプリ名、ランタイム `dotnet-isolated / 10.0` を確認。
    想定と異なる場合は発行せず、対象を修正します。
-5. 以下は「事前ビルド済み ZIP」または「ソースからビルド」の **どちらか一方**を選択します。
+5. 通常は手順 4.1.2 で GitHub からソースを取得し、手順 4.1.3 でビルドします。
+   事前ビルド済み ZIP を使う場合は、4.1.2 の代替手順から 4.1.4 へ進みます。
 
-#### 4.1.2 事前ビルド済み ZIP をアップロードする（推奨・SDK 不要）
+#### 4.1.2 git clone でコードを取得する（推奨）
 
-1. 提供者から **`bing-domain-guard-function.zip`** を入手します。
-   これは Linux x64 / .NET 10 用の発行成果物で、ソース ZIP とは異なります。
-2. Cloud Shell のツールバー → **ファイルのアップロード/ダウンロード → アップロード**で ZIP を選択。
-3. アップロード完了時に表示されるパスを確認。通常は `$HOME` 配下です。
-4. 次を実行し、手順 4.1.4 へ進みます。パスが異なる場合は実際のパスへ修正してください。
+1. 同じ Bash セッションで次を実行します。ソース ZIP のダウンロードやアップロードは不要です。
+
+```bash
+git clone --branch main --single-branch \
+  https://github.com/Liminghao0922/demo-bing-domain-guard.git \
+  "$WORKDIR/source"
+
+SOURCE_DIR="$WORKDIR/source"
+test -f "$SOURCE_DIR/BingDomainGuard.csproj"
+git -C "$SOURCE_DIR" rev-parse HEAD
+```
+
+2. 表示されたコミット ID を検証記録へ保存します。再現性が必要な場合は、ビルド前に
+   `git -C "$SOURCE_DIR" checkout --detach <承認済みコミットIDまたはタグ>` で検証対象を固定し、
+   再度 `rev-parse HEAD` で確認してください。
+3. 非公開リポジトリの場合、Azure のサインインだけでは GitHub の権限は得られません。
+   顧客に承認済みのアクセス権を付与し、組織指定の GitHub 認証を行ってください。
+   GitHub CLI が利用可能なら `gh auth login --hostname github.com --git-protocol https --web` と
+   `gh auth setup-git --hostname github.com` で認証できます。PAT を clone URL や文書に埋め込まないでください。
+4. clone 後は **現在のソースからビルド**します。リポジトリ内にある既存の ZIP を使って代用すると、
+   ソースの修正が反映されない場合があります。
+5. 手順 4.1.3 へ進みます。
+
+**代替 A：GitHub へ接続できない場合はソース ZIP をアップロード**
+
+Cloud Shell のツールバー → **ファイルのアップロード/ダウンロード → アップロード**で、
+提供者の `bing-domain-guard-cloudshell-source.zip` をアップロードします。
+clone を実施していない同じセッションで、次を実行して 4.1.3 へ進みます。
+
+```bash
+unzip "$HOME/bing-domain-guard-cloudshell-source.zip" -d "$WORKDIR/source"
+SOURCE_DIR="$WORKDIR/source"
+test -f "$SOURCE_DIR/BingDomainGuard.csproj"
+```
+
+ZIP のルートには `BingDomainGuard.csproj` / `Program.cs` / `host.json` / `src` が必要です。
+`local.settings.json`、キー、接続文字列は含めません。
+
+**代替 B：ビルドできない場合は発行済み形式の ZIP をアップロード**
+
+提供者の `bing-domain-guard-function.zip` を同じアップロード UI で送信し、以下を実行して
+**4.1.3 をスキップし、4.1.4 へ進みます**。Linux x64 / .NET 10 用のコンパイル済み ZIP が必要です。
 
 ```bash
 PACKAGE="$HOME/bing-domain-guard-function.zip"
 test -f "$PACKAGE"
 ```
 
-> GitHub の **Download ZIP** はソースの ZIP であり、そのまま Function へ発行できません。
-> また、コードがリポジトリへ公開されているとは限らないため、GitHub にある想定で clone せず、
-> 提供された ZIP の種類と内容を確認してください。
+アップロードの表示パスが異なる場合は実際のパスへ修正してください。
+GitHub の **Download ZIP** はソースの ZIP であり、そのまま Function へ発行できません。
 
-#### 4.1.3 ソースから Cloud Shell 上でビルドする（変更が必要な場合のみ）
+#### 4.1.3 Cloud Shell 上で .NET 10 をビルドし、発行用 ZIP を作成する
 
-1. **`bing-domain-guard-cloudshell-source.zip`** をアップロードします。
-   ZIP のルートに `BingDomainGuard.csproj` / `Program.cs` / `host.json` / `src` が必要です。
-   `local.settings.json`、キー、接続文字列は含めません。
-2. .NET 10 SDK を確認し、なければ公式スクリプトを使って **Cloud Shell のユーザー領域だけ**へ導入します。
-   PC 側へのインストールや `sudo` は不要です。
+1. .NET 10 SDK を確認し、なければ公式スクリプトを使って **Cloud Shell のユーザー領域だけ**へ導入します。
+   PC 側へのインストールや `sudo` は不要です。手順 4.1.2 の `SOURCE_DIR` を使用します。
 
 ```bash
-unzip "$HOME/bing-domain-guard-cloudshell-source.zip" -d "$WORKDIR/source"
-test -f "$WORKDIR/source/BingDomainGuard.csproj"
+test -f "$SOURCE_DIR/BingDomainGuard.csproj"
 
 if ! dotnet --list-sdks 2>/dev/null | grep -q '^10\.'; then
   curl -fsSL https://dot.net/v1/dotnet-install.sh \
@@ -178,7 +213,7 @@ if ! dotnet --list-sdks 2>/dev/null | grep -q '^10\.'; then
 fi
 
 dotnet --list-sdks
-dotnet publish "$WORKDIR/source/BingDomainGuard.csproj" \
+dotnet publish "$SOURCE_DIR/BingDomainGuard.csproj" \
   --configuration Release --runtime linux-x64 --self-contained false \
   --output "$WORKDIR/publish" --nologo
 
@@ -197,10 +232,11 @@ print("Deployment ZIP created.")
 PY
 ```
 
-3. SDK / NuGet のダウンロードが組織のネットワーク制限で失敗する場合は、制限を迂回せず許可を確認するか、
-   手順 4.1.2 の事前ビルド済み ZIP を使用します。
-4. ZIP に親の `publish` フォルダーを含めず、`.azurefunctions` も省略しません。
+2. SDK / NuGet のダウンロードが組織のネットワーク制限で失敗する場合は、制限を迂回せず許可を確認するか、
+   手順 4.1.2 の「代替 B」を使用します。
+3. ZIP に親の `publish` フォルダーを含めず、`.azurefunctions` も省略しません。
    上記の処理は隠しフォルダーを含めて、発行フォルダーの **中身だけ**を ZIP 化します。
+4. 次の 4.1.4 でパッケージの構造を確認し、Function へ発行します。
 
 #### 4.1.4 ZIP を検査して発行する
 
