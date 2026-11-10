@@ -1,0 +1,28 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "publish-function",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "publish",
+        "${workspaceFolder}\\BingDomainGuard.csproj",
+        "--configuration",
+        "Release",
+        "--output",
+        "${workspaceFolder}\\publish"
+      ],
+      "problemMatcher": "$msCompile",
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "test-function",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["test", "${workspaceFolder}\\test\\BingDomainGuard.Tests.csproj"],
+      "problemMatcher": "$msCompile",
+      "group": "test"
+    }
+  ]
+}

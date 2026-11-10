@@ -1,0 +1,6 @@
+traces
+| where message == "BingGuardTriggered"
+| extend BingInstance = tostring(customDimensions.bingInstance),
+         ProductName = tostring(customDimensions.productName),
+         GuardMode = tostring(customDimensions.guardMode)
+| project timestamp, BingInstance, ProductName, GuardMode

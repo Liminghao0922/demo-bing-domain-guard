@@ -1,0 +1,11 @@
+traces
+| where timestamp > ago(1d)
+| where message == "BingGuardTriggered"
+| extend Instance = tostring(customDimensions.bingInstance),
+         Product = tostring(customDimensions.productName),
+         TraceId = tostring(customDimensions.bingTraceId),
+         Hosts = tostring(customDimensions.violatedHosts),
+         RequestId = tostring(customDimensions.apimRequestId),
+         Mode = tostring(customDimensions.guardMode)
+| project timestamp, Instance, Product, TraceId, Hosts, RequestId, Mode
+| order by timestamp desc

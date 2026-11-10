@@ -1,0 +1,227 @@
+<fragment>
+  <choose>
+    <when condition="@((string)context.Variables[&quot;bing-guard-mode&quot;] != &quot;off&quot;)">
+      <set-variable name="bing-guard-validation" id="bing-guard-validate" value="@{
+        var mode = (string)context.Variables[&quot;bing-guard-mode&quot;];
+        if (mode != &quot;monitor&quot; &amp;&amp; mode != &quot;enforce&quot;)
+        {
+            return &quot;config:error&quot;;
+        }
+        var keywords = &quot;{{bing-guard-allowed-keywords}}&quot;.ToLowerInvariant().Split(',');
+        var domains = &quot;{{bing-guard-allowed-domains}}&quot;.ToLowerInvariant().Split(',');
+        var configured = false;
+        for (var i = 0; i &lt; keywords.Length; i++)
+        {
+            keywords[i] = keywords[i].Trim();
+            if (keywords[i].Length == 0) { continue; }
+            if (!System.Text.RegularExpressions.Regex.IsMatch(keywords[i], @&quot;^[a-z0-9-]+$&quot;))
+            {
+                return &quot;config:error&quot;;
+            }
+            configured = true;
+        }
+        for (var i = 0; i &lt; domains.Length; i++)
+        {
+            domains[i] = domains[i].Trim().TrimEnd('.');
+            if (domains[i].Length == 0) { continue; }
+            if (!System.Text.RegularExpressions.Regex.IsMatch(domains[i], @&quot;^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$&quot;))
+            {
+                return &quot;config:error&quot;;
+            }
+            configured = true;
+        }
+        if (!configured) { return &quot;config:error&quot;; }
+        var sorryUrl = &quot;{{bing-guard-sorry-url}}&quot;;
+        System.Uri sorryUri;
+        /* A null base avoids UriKind, which APIM expressions do not expose. */
+        if (System.Text.RegularExpressions.Regex.IsMatch(sorryUrl, @&quot;[\x00-\x20\x7f\\]&quot;)
+            || !System.Uri.TryCreate(null, sorryUrl, out sorryUri)
+            || !sorryUri.IsAbsoluteUri
+            || (sorryUri.Scheme != &quot;https&quot; &amp;&amp; sorryUri.Scheme != &quot;http&quot;)
+            || !sorryUri.IsWellFormedOriginalString() || !string.IsNullOrEmpty(sorryUri.UserInfo))
+        {
+            return &quot;config:error&quot;;
+        }
+        if (context.Response.StatusCode != 200) { return &quot;skip:http-status&quot;; }
+        var mediaType = context.Response.Headers.GetValueOrDefault(&quot;Content-Type&quot;, &quot;&quot;).Split(';')[0].Trim();
+        if (!mediaType.Equals(&quot;application/json&quot;, System.StringComparison.OrdinalIgnoreCase))
+        {
+            return &quot;skip:content-type&quot;;
+        }
+        Newtonsoft.Json.Linq.JObject payload;
+        try
+        {
+            payload = context.Response.Body.As&lt;Newtonsoft.Json.Linq.JToken&gt;(preserveContent: true) as Newtonsoft.Json.Linq.JObject;
+        }
+        catch (System.Exception exception)
+        {
+            if (exception.Source == &quot;Newtonsoft.Json&quot;)
+            {
+                return &quot;skip:invalid-json&quot;;
+            }
+            throw;
+        }
+        if (payload == null) { return &quot;skip:unexpected-shape&quot;; }
+        var pages = payload[&quot;webPages&quot;] as Newtonsoft.Json.Linq.JObject;
+        if (pages == null) { return &quot;skip:no-webpages&quot;; }
+        var results = pages[&quot;value&quot;] as Newtonsoft.Json.Linq.JArray;
+        if (results == null) { return &quot;skip:unexpected-shape&quot;; }
+        if (results.Count == 0) { return &quot;skip:empty&quot;; }
+        var urls = new System.Collections.Generic.List&lt;string&gt;();
+        foreach (var item in results)
+        {
+            var result = item as Newtonsoft.Json.Linq.JObject;
+            urls.Add(result != null &amp;&amp; result[&quot;url&quot;] != null &amp;&amp; result[&quot;url&quot;].Type == Newtonsoft.Json.Linq.JTokenType.String
+                ? (string)result[&quot;url&quot;] : &quot;&quot;);
+            if (result == null || result[&quot;deepLinks&quot;] == null) { continue; }
+            var links = result[&quot;deepLinks&quot;] as Newtonsoft.Json.Linq.JArray;
+            if (links == null) { urls.Add(&quot;&quot;); continue; }
+            foreach (var link in links)
+            {
+                var deepLink = link as Newtonsoft.Json.Linq.JObject;
+                urls.Add(deepLink != null &amp;&amp; deepLink[&quot;url&quot;] != null &amp;&amp; deepLink[&quot;url&quot;].Type == Newtonsoft.Json.Linq.JTokenType.String
+                    ? (string)deepLink[&quot;url&quot;] : &quot;&quot;);
+            }
+        }
+        var violations = new System.Collections.Generic.List&lt;string&gt;();
+        foreach (var rawUrl in urls)
+        {
+            var host = &quot;[invalid-url]&quot;;
+            var allowed = false;
+            System.Uri uri;
+            if (!string.IsNullOrWhiteSpace(rawUrl)
+                &amp;&amp; !System.Text.RegularExpressions.Regex.IsMatch(rawUrl, @&quot;[\x00-\x20\x7f\\]&quot;)
+                &amp;&amp; System.Uri.TryCreate(null, rawUrl, out uri)
+                &amp;&amp; uri.IsAbsoluteUri
+                &amp;&amp; (uri.Scheme == &quot;https&quot; || uri.Scheme == &quot;http&quot;)
+                &amp;&amp; uri.IsWellFormedOriginalString() &amp;&amp; string.IsNullOrEmpty(uri.UserInfo))
+            {
+                host = uri.IdnHost.TrimEnd('.').ToLowerInvariant();
+                foreach (var keyword in keywords)
+                {
+                    if (keyword.Length &gt; 0 &amp;&amp; host.Contains(keyword)) { allowed = true; break; }
+                }
+                foreach (var domain in domains)
+                {
+                    if (domain.Length &gt; 0 &amp;&amp; (host == domain || host.EndsWith(&quot;.&quot; + domain, System.StringComparison.Ordinal)))
+                    {
+                        allowed = true;
+                        break;
+                    }
+                }
+            }
+            if (!allowed &amp;&amp; !violations.Contains(host) &amp;&amp; violations.Count &lt; 10) { violations.Add(host); }
+        }
+        return string.Join(&quot;,&quot;, violations);
+      }" />
+      <choose>
+        <when condition="@((string)context.Variables[&quot;bing-guard-validation&quot;] == &quot;config:error&quot;)">
+          <trace source="bing-domain-guard" severity="error">
+            <message>BingGuardConfigurationError</message>
+            <metadata name="apimRequestId" value="@(context.RequestId.ToString())" />
+          </trace>
+          <return-response>
+            <set-status code="500" reason="Internal Server Error" />
+            <set-header name="Content-Type" exists-action="override"><value>application/json; charset=utf-8</value></set-header>
+            <set-header name="Cache-Control" exists-action="override"><value>no-store</value></set-header>
+            <set-body>{"error":{"code":"GATEWAY_CONFIGURATION_ERROR","message":"The search gateway is misconfigured."}}</set-body>
+          </return-response>
+        </when>
+        <when condition="@(((string)context.Variables[&quot;bing-guard-validation&quot;]).StartsWith(&quot;skip:&quot;))">
+          <set-header name="X-Bing-Guard" exists-action="override"><value>skipped</value></set-header>
+          <trace source="bing-domain-guard" severity="error">
+            <message>BingGuardSkipped</message>
+            <metadata name="reason" value="@((string)context.Variables[&quot;bing-guard-validation&quot;])" />
+            <metadata name="apimRequestId" value="@(context.RequestId.ToString())" />
+          </trace>
+        </when>
+        <when condition="@((string)context.Variables[&quot;bing-guard-validation&quot;] == &quot;&quot;)">
+          <set-header name="X-Bing-Guard" exists-action="override"><value>pass</value></set-header>
+        </when>
+        <otherwise>
+          <trace source="bing-domain-guard" severity="error">
+            <message>BingGuardTriggered</message>
+            <metadata name="guardMode" value="@((string)context.Variables[&quot;bing-guard-mode&quot;])" />
+            <metadata name="bingInstance" value="@{
+              var instance = context.Request.Url.Query.GetValueOrDefault(&quot;customconfig&quot;, &quot;&quot;);
+              return string.IsNullOrWhiteSpace(System.Uri.UnescapeDataString(instance.Replace(&quot;+&quot;, &quot; &quot;))) ? &quot;unknown&quot; : instance;
+            }" />
+            <metadata name="productName" value="@(context.Product == null ? &quot;unassigned&quot; : context.Product.Name)" />
+            <metadata name="subscriptionName" value="@(context.Subscription == null ? &quot;unassigned&quot; : context.Subscription.Name)" />
+            <metadata name="bingTraceId" value="@(context.Response.Headers.GetValueOrDefault(&quot;BingAPIs-TraceId&quot;, &quot;missing&quot;))" />
+            <metadata name="violatedHosts" value="@((string)context.Variables[&quot;bing-guard-validation&quot;])" />
+            <metadata name="market" value="@{
+              var market = context.Request.Url.Query.GetValueOrDefault(&quot;mkt&quot;, &quot;&quot;);
+              return string.IsNullOrWhiteSpace(System.Uri.UnescapeDataString(market.Replace(&quot;+&quot;, &quot; &quot;))) ? &quot;unspecified&quot; : market;
+            }" />
+            <metadata name="searchQuery" value="@{
+              var query = context.Request.Url.Query.GetValueOrDefault(&quot;q&quot;, &quot;&quot;);
+              if (string.IsNullOrWhiteSpace(System.Uri.UnescapeDataString(query.Replace(&quot;+&quot;, &quot; &quot;)))) { return &quot;unspecified&quot;; }
+              return query.Length &gt; 100 ? query.Substring(0, 100) : query;
+            }" />
+            <metadata name="apimRequestId" value="@(context.RequestId.ToString())" />
+          </trace>
+          <emit-metric name="BingGuardTriggered" value="1" namespace="BingGuard">
+            <dimension name="BingInstance" value="@{
+              var instance = context.Request.Url.Query.GetValueOrDefault(&quot;customconfig&quot;, &quot;&quot;);
+              return string.IsNullOrWhiteSpace(System.Uri.UnescapeDataString(instance.Replace(&quot;+&quot;, &quot; &quot;))) ? &quot;unknown&quot; : instance;
+            }" />
+            <dimension name="ProductName" value="@(context.Product == null ? &quot;unassigned&quot; : context.Product.Name)" />
+            <dimension name="GuardMode" value="@((string)context.Variables[&quot;bing-guard-mode&quot;])" />
+          </emit-metric>
+          <choose>
+            <when condition="@((string)context.Variables[&quot;bing-guard-mode&quot;] == &quot;monitor&quot;)">
+              <set-header name="X-Bing-Guard" exists-action="override"><value>detected-monitor-only</value></set-header>
+            </when>
+            <otherwise>
+              <set-header name="X-Bing-Guard" exists-action="override"><value>blocked</value></set-header>
+              <set-header name="Content-Type" exists-action="override"><value>application/json; charset=utf-8</value></set-header>
+              <set-header name="Content-Encoding" exists-action="delete" />
+              <set-header name="ETag" exists-action="delete" />
+              <set-header name="Last-Modified" exists-action="delete" />
+              <set-header name="Cache-Control" exists-action="override"><value>no-store</value></set-header>
+              <set-body id="bing-guard-replacement">@{
+                var original = context.Response.Body.As&lt;Newtonsoft.Json.Linq.JObject&gt;(preserveContent: true);
+                var title = "{{bing-guard-sorry-title}}";
+                var snippet = "{{bing-guard-sorry-snippet}}";
+                var url = "{{bing-guard-sorry-url}}";
+                var id = "https://api.bing.microsoft.com/api/v7/#WebPages.0";
+                var result = new Newtonsoft.Json.Linq.JObject(
+                    new Newtonsoft.Json.Linq.JProperty("id", id),
+                    new Newtonsoft.Json.Linq.JProperty("name", title),
+                    new Newtonsoft.Json.Linq.JProperty("url", url),
+                    new Newtonsoft.Json.Linq.JProperty("displayUrl", url),
+                    new Newtonsoft.Json.Linq.JProperty("snippet", snippet),
+                    new Newtonsoft.Json.Linq.JProperty("dateLastCrawled", System.DateTime.UtcNow.ToString("o")),
+                    new Newtonsoft.Json.Linq.JProperty("language", "en"),
+                    new Newtonsoft.Json.Linq.JProperty("isFamilyFriendly", true),
+                    new Newtonsoft.Json.Linq.JProperty("isNavigational", false));
+                var pages = new Newtonsoft.Json.Linq.JObject(
+                    new Newtonsoft.Json.Linq.JProperty("totalEstimatedMatches", 1),
+                    new Newtonsoft.Json.Linq.JProperty("value", new Newtonsoft.Json.Linq.JArray(result)));
+                var originalPages = (Newtonsoft.Json.Linq.JObject)original["webPages"];
+                if (originalPages["webSearchUrl"] != null) { pages["webSearchUrl"] = originalPages["webSearchUrl"].DeepClone(); }
+                var replacement = new Newtonsoft.Json.Linq.JObject(
+                    new Newtonsoft.Json.Linq.JProperty("_type", "SearchResponse"),
+                    new Newtonsoft.Json.Linq.JProperty("webPages", pages));
+                if (original["queryContext"] != null) { replacement["queryContext"] = original["queryContext"].DeepClone(); }
+                if (original["rankingResponse"] != null)
+                {
+                    replacement["rankingResponse"] = new Newtonsoft.Json.Linq.JObject(
+                        new Newtonsoft.Json.Linq.JProperty("mainline", new Newtonsoft.Json.Linq.JObject(
+                            new Newtonsoft.Json.Linq.JProperty("items", new Newtonsoft.Json.Linq.JArray(
+                                new Newtonsoft.Json.Linq.JObject(
+                                    new Newtonsoft.Json.Linq.JProperty("answerType", "WebPages"),
+                                    new Newtonsoft.Json.Linq.JProperty("resultIndex", 0),
+                                    new Newtonsoft.Json.Linq.JProperty("value", new Newtonsoft.Json.Linq.JObject(
+                                        new Newtonsoft.Json.Linq.JProperty("id", id)))))))));
+                }
+                return replacement.ToString(Newtonsoft.Json.Formatting.None);
+              }</set-body>
+            </otherwise>
+          </choose>
+        </otherwise>
+      </choose>
+    </when>
+  </choose>
+</fragment>

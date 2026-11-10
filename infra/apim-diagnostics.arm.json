@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "apimServiceName": { "type": "string" },
+    "apiName": { "type": "string", "defaultValue": "bing-domain-guard" },
+    "loggerName": { "type": "string" }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.ApiManagement/service/apis/diagnostics",
+      "apiVersion": "2024-05-01",
+      "name": "[format('{0}/{1}/applicationinsights', parameters('apimServiceName'), parameters('apiName'))]",
+      "properties": {
+        "loggerId": "[resourceId('Microsoft.ApiManagement/service/loggers', parameters('apimServiceName'), parameters('loggerName'))]",
+        "alwaysLog": "allErrors",
+        "sampling": { "samplingType": "fixed", "percentage": 100 },
+        "verbosity": "error",
+        "metrics": true,
+        "logClientIp": false,
+        "frontend": {
+          "request": { "headers": [], "body": { "bytes": 0 } },
+          "response": { "headers": [], "body": { "bytes": 0 } }
+        },
+        "backend": {
+          "request": { "headers": [], "body": { "bytes": 0 } },
+          "response": { "headers": [], "body": { "bytes": 0 } }
+        }
+      }
+    }
+  ]
+}

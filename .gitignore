@@ -218,3 +218,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# .NET / Azure Functions
+bin/
+obj/
+TestResults/
+publish/
+local.settings.json
+*.user
+.vs/
+.azure/validate-status.json

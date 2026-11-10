@@ -1,0 +1,13 @@
+.git*
+.azure/
+local.settings.json
+local.settings.example.json
+infra/
+apim/
+test/
+README.txt
+docs/
+monitoring/
+**/obj/
+**/bin/
+publish/

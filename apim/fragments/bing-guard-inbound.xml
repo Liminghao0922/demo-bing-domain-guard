@@ -1,0 +1,8 @@
+<fragment>
+  <set-variable name="bing-guard-mode" value="@(&quot;{{bing-guard-mode}}&quot;.Trim().ToLowerInvariant())" />
+  <choose>
+    <when condition="@((string)context.Variables[&quot;bing-guard-mode&quot;] != &quot;off&quot;)">
+      <set-header name="Accept-Encoding" exists-action="delete" />
+    </when>
+  </choose>
+</fragment>

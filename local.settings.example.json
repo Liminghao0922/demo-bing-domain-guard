@@ -1,0 +1,9 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "AzureWebJobsStorage": "",
+    "MOCK_ALLOWED_DOMAIN": "panasonic.jp",
+    "MOCK_EXCEPTION_DOMAIN": "exceptions.example"
+  }
+}

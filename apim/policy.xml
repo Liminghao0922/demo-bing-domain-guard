@@ -1,0 +1,24 @@
+<policies>
+  <inbound>
+    <base />
+    <set-backend-service backend-id="bing-mock-function" />
+    <rewrite-uri template="/search" copy-unmatched-params="true" />
+    <set-query-parameter name="code" exists-action="delete" />
+    <set-query-parameter name="subscription-key" exists-action="delete" />
+    <set-header name="Ocp-Apim-Subscription-Key" exists-action="delete" />
+    <set-header name="x-functions-key" exists-action="override">
+      <value>{{bing-function-key}}</value>
+    </set-header>
+    <include-fragment fragment-id="bing-guard-inbound" />
+  </inbound>
+  <backend>
+    <forward-request timeout="30" follow-redirects="false" buffer-response="true" fail-on-error-status-code="false" />
+  </backend>
+  <outbound>
+    <base />
+    <include-fragment fragment-id="bing-guard-outbound" />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>
